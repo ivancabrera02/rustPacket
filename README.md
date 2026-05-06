@@ -39,7 +39,7 @@ rustPacket is designed for penetration testers, red teamers, and security resear
 
 ### Privilege Escalation & Exploitation
 - **RBCD** — Exploit Resource-Based Constrained Delegation misconfigurations
-- **mssqclient** — SQL Server client for database interaction and privilege escalation
+- **mssqclient** — MSSQL Server client for database interaction and privilege escalation
 
 ## Installation
 
@@ -72,7 +72,7 @@ Binaries will be available at `target/release/`.
 | rustPacket-smbclient | SMB client for enumerating network shares and resources |
 | rustPacket-getTGT | Obtains Kerberos Ticket Granting Tickets (TGT) |
 | rustPacket-rbcd | Exploits Resource-Based Constrained Delegation (RBCD) configurations |
-| rustPacket-mssqclient | Client for interacting with SQL Server databases |
+| rustPacket-mssqclient | Client for interacting with MSSQL Server databases |
 | rustPacket-LDAPCheckStatus | Verifies the status and availability of LDAP services |
 
 ## Contributing
