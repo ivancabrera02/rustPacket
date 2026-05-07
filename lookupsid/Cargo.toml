@@ -1,0 +1,24 @@
+[package]
+name = "lookupsid"
+version = "0.1.0"
+edition = "2021"
+description = "SID brute-forcer via SMB2/MSRPC [MS-LSAT] - impacket lookupsid.py port to Rust"
+
+[[bin]]
+name = "lookupsid"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "=1.35.1", features = ["full"] }
+clap = { version = "=4.4.18", features = ["derive"] }
+hex = "=0.4.3"
+anyhow = "=1.0.75"
+thiserror = "=1.0.50"
+tracing = "=0.1.40"
+tracing-subscriber = { version = "=0.3.18", features = ["env-filter"] }
+rand = "=0.8.5"
+hmac = "=0.12.1"
+md-5 = "=0.10.6"
+sha1 = "=0.10.6"
+sha2 = "=0.10.8"
+generic-array = "=0.14.7"
