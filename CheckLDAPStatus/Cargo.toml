@@ -1,0 +1,10 @@
+[package]
+name = "rust_check_ldap_adv"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ldap3 = "0.11"
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4.0", features = ["derive"] }
+trust-dns-resolver = "0.23"
