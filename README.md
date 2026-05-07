@@ -63,17 +63,17 @@ Binaries will be available at `target/release/`.
 
 | Tool | Description |
 |---|---|
-| rustPacket-GetADComputers | Enumerates and retrieves information about computers in Active Directory |
-| rustPacket-GetADUsers | Lists Active Directory users and their attributes |
-| rustPacket-GetNPUsers | Identifies AD users without Kerberos pre-authentication requirement |
-| rustPacket-GetUsersSPN | Searches and enumerates Service Principal Names (SPNs) for AD users |
-| rustPacket-lookupsid | Performs reverse SID lookups to obtain usernames and group names |
-| rustPacket-samrdump | Extracts local account information using the SAM-R protocol |
-| rustPacket-smbclient | SMB client for enumerating network shares and resources |
-| rustPacket-getTGT | Obtains Kerberos Ticket Granting Tickets (TGT) |
-| rustPacket-rbcd | Exploits Resource-Based Constrained Delegation (RBCD) configurations |
-| rustPacket-mssqclient | Client for interacting with MSSQL Server databases |
-| rustPacket-LDAPCheckStatus | Verifies the status and availability of LDAP services |
+| GetADComputers | Enumerates and retrieves information about computers in Active Directory |
+| GetADUsers | Lists Active Directory users and their attributes |
+| GetNPUsers | Identifies AD users without Kerberos pre-authentication requirement |
+| GetUsersSPN | Searches and enumerates Service Principal Names (SPNs) for AD users |
+| lookupsid | Performs reverse SID lookups to obtain usernames and group names |
+| samrdump | Extracts local account information using the SAM-R protocol |
+| smbclient | SMB client for enumerating network shares and resources |
+| getTGT | Obtains Kerberos Ticket Granting Tickets (TGT) |
+| rbcd | Exploits Resource-Based Constrained Delegation (RBCD) configurations |
+| mssqclient | Client for interacting with MSSQL Server databases |
+| LDAPCheckStatus | Verifies the status and availability of LDAP services |
 
 ## Contributing
 
