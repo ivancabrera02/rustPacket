@@ -24,6 +24,7 @@ rustPacket is designed for penetration testers, red teamers, and security resear
 - **Kerberoasting** — Extract service account credentials via SPN enumeration
 - **AS-REP Roasting** — Exploit users without Kerberos pre-authentication
 - **getTGT** — Request and export Kerberos Ticket Granting Tickets (TGT)
+- **getPAC** — Extract and analyze Privilege Attribute Certificate (PAC) from Kerberos tickets
 
 ### Active Directory Enumeration
 - **GetADComputers** — Enumerate and retrieve computer objects from Active Directory
@@ -39,7 +40,7 @@ rustPacket is designed for penetration testers, red teamers, and security resear
 
 ### Privilege Escalation & Exploitation
 - **RBCD** — Exploit Resource-Based Constrained Delegation misconfigurations
-- **mssqclient** — MSSQL Server client for database interaction and privilege escalation
+- **mssqclient** — SQL Server client for database interaction and privilege escalation
 
 ## Installation
 
@@ -70,6 +71,7 @@ Binaries will be available at `target/release/`.
 | lookupsid | Performs reverse SID lookups to obtain usernames and group names |
 | samrdump | Extracts local account information using the SAM-R protocol |
 | smbclient | SMB client for enumerating network shares and resources |
+| getPAC | Extracts and analyzes Privilege Attribute Certificate (PAC) from Kerberos tickets |
 | getTGT | Obtains Kerberos Ticket Granting Tickets (TGT) |
 | rbcd | Exploits Resource-Based Constrained Delegation (RBCD) configurations |
 | mssqclient | Client for interacting with MSSQL Server databases |
