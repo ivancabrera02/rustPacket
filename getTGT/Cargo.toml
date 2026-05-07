@@ -1,0 +1,17 @@
+[package]
+name = "get_tgt"
+version = "0.3.0"
+edition = "2021"
+description = "Rust implementation of Impacket's getTGT - requests a TGT via Kerberos AS-REQ"
+
+[dependencies]
+# High-level kerberos client library (handles AS-REQ/AS-REP, preauth, etype negotiation)
+kerbeiros = "0.2"
+# Crypto crate for the Key enum (re-exported by kerbeiros)
+kerberos_crypto = "0.3"
+kerberos_constants = "0.0"
+ascii = "0.9"
+clap = { version = "4", features = ["derive"] }
+hex = "0.4"
+rpassword = "7"
+anyhow = "1"
