@@ -47,7 +47,7 @@ rustPacket is designed for penetration testers, red teamers, and security resear
 
 ```bash
 git clone https://github.com/ivancabrera02/rustPacket.git
-cd rustPacket
+cd rustPacket/<project>
 cargo build --release
 ```
 
