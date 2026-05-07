@@ -1,0 +1,23 @@
+[package]
+name = "samrdump-rs"
+version = "0.1.0"
+edition = "2021"
+description = "DCE/RPC SAMR dumper in Rust — enumerates users, groups and domains via MS-SAMR over SMB"
+license = "MIT"
+
+[[bin]]
+name = "samrdump"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+thiserror = "1"
+byteorder = "1"
+uuid = { version = "1", features = ["v4"] }
+md5 = { package = "md-5", version = "0.10" }
+hmac = "0.12"
+sha2 = "0.10"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+chrono = "0.4"
