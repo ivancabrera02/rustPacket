@@ -1,0 +1,34 @@
+[package]
+name = "getpac"
+version = "0.1.0"
+edition = "2021"
+description = "getPac tool in Rust - Retrieve the PAC of a target user via S4U2Self + U2U"
+license = "MIT"
+
+[[bin]]
+name = "getpac"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Kerberos ASN.1 and crypto from Zer1t0's kerbeiros suite
+kerberos_asn1 = "0.2"
+kerberos_crypto = "0.3"
+kerberos_constants = "0.0"
+red_asn1 = "0.3"
+
+# For PA-FOR-USER HMAC-MD5 checksum
+hmac = "0.12"
+md-5 = "0.10"
+digest = "0.10"
+
+# Encoding / Network / Misc
+hex = "0.4"
+chrono = "0.4"
+rand = "0.8"
+byteorder = "1"
+dns-lookup = "2"
