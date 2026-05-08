@@ -1,0 +1,20 @@
+[package]
+name = "mssqlclient"
+version = "0.1.0"
+edition = "2021"
+description = "MSSQL offensive client in Rust - impacket mssqlclient equivalent"
+
+[dependencies]
+tiberius   = { version = "0.12", default-features = false, features = ["tds73", "native-tls", "winauth"] }
+tokio      = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+futures    = { version = "0.3", default-features = false, features = ["std"] }
+clap       = { version = "4", features = ["derive"] }
+rustyline  = "14"
+rpassword  = "7"
+anyhow     = "1"
+
+[profile.release]
+opt-level = 3
+strip = true
+lto = true
