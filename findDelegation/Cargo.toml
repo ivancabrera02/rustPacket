@@ -1,0 +1,19 @@
+[package]
+name = "find_delegation"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "find_delegation"
+path = "src/main.rs"
+
+[dependencies]
+ldap3 = "=0.11.3"
+clap = { version = "=4.4.18", features = ["derive"] }
+tokio = { version = "=1.35.1", features = ["full"] }
+anyhow = "=1.0.75"
+colored = "=2.0.4"
+url = "=2.4.1"
+idna = "=0.5.0"
+native-tls = "=0.2.11"
+tokio-stream = "=0.1.14"
