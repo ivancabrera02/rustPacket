@@ -1,0 +1,26 @@
+[package]
+name = "get_users_spn"
+version = "0.2.0"
+edition = "2021"
+
+[[bin]]
+name = "get_users_spn"
+path = "src/main.rs"
+
+[dependencies]
+ldap3     = { version = "=0.11.1", features = ["tls"] }
+tokio     = { version = "=1.40.0", features = ["full"] }
+clap      = { version = "=4.4.18", features = ["derive"] }
+chrono    = { version = "=0.4.31", default-features = false, features = ["clock", "std"] }
+md-5      = "=0.10.6"
+hmac      = "=0.12.1"
+rc4       = "=0.1.0"
+aes       = "=0.8.4"
+sha-1     = "=0.10.1"
+pbkdf2    = { version = "=0.12.2", features = ["hmac"] }
+rand      = "=0.8.5"
+hex       = "=0.4.3"
+thiserror = "=1.0.56"
+native-tls = "=0.2.11"
+url        = "=2.4.1"
+idna       = "=0.4.0"
