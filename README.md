@@ -31,6 +31,7 @@ rustPacket is designed for penetration testers, red teamers, and security resear
 - **GetADUsers** — List AD users and extract detailed attribute information
 - **GetNPUsers** — Identify users without Kerberos pre-authentication requirements
 - **GetUsersSPN** — Enumerate Service Principal Names (SPNs) for user accounts
+- **findDelegation** — Identify and enumerate delegation configurations in Active Directory
 - **LDAPCheckStatus** — Verify LDAP service availability and connectivity
 
 ### Local & Remote Access
@@ -71,6 +72,7 @@ Binaries will be available at `target/release/`.
 | lookupsid | Performs reverse SID lookups to obtain usernames and group names |
 | samrdump | Extracts local account information using the SAM-R protocol |
 | smbclient | SMB client for enumerating network shares and resources |
+| findDelegation | Identifies and enumerates delegation configurations in Active Directory |
 | getPAC | Extracts and analyzes Privilege Attribute Certificate (PAC) from Kerberos tickets |
 | getTGT | Obtains Kerberos Ticket Granting Tickets (TGT) |
 | rbcd | Exploits Resource-Based Constrained Delegation (RBCD) configurations |
