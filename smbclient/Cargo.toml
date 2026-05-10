@@ -1,0 +1,20 @@
+[package]
+name = "smbclient-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Interactive SMB2/3 client in pure Rust — like impacket's smbclient"
+license = "MIT"
+
+[[bin]]
+name = "smbclient-rs"
+path = "src/main.rs"
+
+[dependencies]
+smb = "0.11"
+smb-rpc = "=0.11.2"
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive"] }
+rustyline = "14"
+colored = "2"
+anyhow = "1"
+futures-util = "0.3"
