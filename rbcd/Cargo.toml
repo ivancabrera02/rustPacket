@@ -1,0 +1,23 @@
+[package]
+name = "rbcd"
+version = "0.1.0"
+edition = "2021"
+description = "Resource-Based Constrained Delegation (RBCD) — msDS-AllowedToActOnBehalfOfOtherIdentity"
+
+[[bin]]
+name = "rbcd"
+path = "src/main.rs"
+
+[dependencies]
+ldap3          = { version = "0.11", default-features = false, features = ["tls-rustls"] }
+clap           = { version = "=4.4.18", features = ["derive"] }
+rpassword      = "=7.3.1"
+tokio          = { version = "1", features = ["full"] }
+anyhow         = "1"
+hex            = "0.4"
+time           = "=0.3.36"
+idna           = "=0.3.0"
+url            = "=2.4.1"
+md4   = "0.10"
+hmac  = "0.12"
+md-5  = "0.10"
