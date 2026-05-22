@@ -1,0 +1,24 @@
+[package]
+name = "getST"
+version = "1.0.0"
+edition = "2021"
+
+[[bin]]
+name = "getST"
+path = "src/main.rs"
+
+[dependencies]
+kerberos_asn1 = "0.2"
+kerberos_crypto = "0.3"
+kerberos_constants = "0.0"
+red_asn1 = "0.3"
+anyhow = "1"
+chrono = "0.4"
+hex = "0.4"
+hmac = "0.12"
+md-5 = "0.10"
+sha1 = "0.10"
+aes = "0.8"
+rand = "0.8"
+dns-lookup = "2"
+backtrace = "=0.3.71"
