@@ -1,0 +1,12 @@
+[package]
+name = "sniff_rs"
+version = "0.1.0"
+edition = "2021"
+description = "Layer-3 IPv4 packet sniffer in pure Rust (like Scapy/impacket sniff())"
+
+[[bin]]
+name = "sniff_rs"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }

@@ -1,0 +1,12 @@
+[package]
+name = "ping_rs"
+version = "0.1.0"
+edition = "2021"
+description = "ICMPv4 ping in pure Rust using raw sockets"
+
+[[bin]]
+name = "ping_rs"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }

@@ -1,0 +1,12 @@
+[package]
+name = "sniffer_rs"
+version = "0.1.0"
+edition = "2021"
+description = "impacket-style Layer-2 Ethernet sniffer in pure Rust (AF_PACKET)"
+
+[[bin]]
+name = "sniffer_rs"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
