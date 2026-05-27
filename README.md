@@ -24,6 +24,7 @@ rustPacket is designed for penetration testers, red teamers, and security resear
 - **Kerberoasting** — Extract service account credentials via SPN enumeration
 - **AS-REP Roasting** — Exploit users without Kerberos pre-authentication
 - **getTGT** — Request and export Kerberos Ticket Granting Tickets (TGT)
+- **getST** — Request and export Kerberos Service Tickets (ST) for specific services
 - **getPAC** — Extract and analyze Privilege Attribute Certificate (PAC) from Kerberos tickets
 
 ### Active Directory Enumeration
@@ -33,6 +34,12 @@ rustPacket is designed for penetration testers, red teamers, and security resear
 - **GetUsersSPN** — Enumerate Service Principal Names (SPNs) for user accounts
 - **findDelegation** — Identify and enumerate delegation configurations in Active Directory
 - **LDAPCheckStatus** — Verify LDAP service availability and connectivity
+
+### Network Discovery & Reconnaissance
+- **ping** — ICMP ping utility for host discovery and connectivity testing
+- **ping6** — ICMPv6 ping utility for IPv6 network host discovery
+- **sniff** — Capture and analyze network traffic packets in real-time
+- **sniffer** — Advanced packet sniffer for detailed network traffic inspection
 
 ### Local & Remote Access
 - **lookupsid** — Perform reverse SID lookups to resolve usernames and group names
@@ -72,11 +79,16 @@ Binaries will be available at `target/release/`.
 | lookupsid | Performs reverse SID lookups to obtain usernames and group names |
 | samrdump | Extracts local account information using the SAM-R protocol |
 | smbclient | SMB client for enumerating network shares and resources |
-| findDelegation | Identifies and enumerates delegation configurations in Active Directory |
-| getPAC | Extracts and analyzes Privilege Attribute Certificate (PAC) from Kerberos tickets |
 | getTGT | Obtains Kerberos Ticket Granting Tickets (TGT) |
+| getST | Requests and exports Kerberos Service Tickets (ST) for specific services |
+| getPAC | Extracts and analyzes Privilege Attribute Certificate (PAC) from Kerberos tickets |
+| findDelegation | Identifies and enumerates delegation configurations in Active Directory |
+| ping | ICMP ping utility for network host discovery and connectivity testing |
+| ping6 | ICMPv6 ping utility for IPv6 network host discovery |
+| sniff | Captures and analyzes network traffic packets in real-time |
+| sniffer | Advanced packet sniffer for detailed network traffic inspection |
 | rbcd | Exploits Resource-Based Constrained Delegation (RBCD) configurations |
-| mssqclient | Client for interacting with MSSQL Server databases |
+| mssqclient | Client for interacting with SQL Server databases |
 | LDAPCheckStatus | Verifies the status and availability of LDAP services |
 
 ## Contributing
